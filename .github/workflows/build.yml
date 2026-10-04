@@ -7,16 +7,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unzip the project
+      - name: Unzip any project zips (ignore errors)
         run: |
-          for z in $(ls *.zip 2>/dev/null); do unzip -o "$z"; done
+          shopt -s nullglob
+          for z in *.zip; do
+            echo "Unzipping $z"
+            unzip -o "$z" || true
+          done
+          echo "After unzip:"; ls -R | head -50
       - name: Find the gradle project folder
         id: find
         run: |
           f=$(find . -name settings.gradle.kts | head -n 1)
           if [ -z "$f" ]; then echo "No Gradle project found"; ls -R; exit 1; fi
           echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
-          echo "Found project in: $(dirname "$f")"
+          echo "Project in: $(dirname "$f")"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
