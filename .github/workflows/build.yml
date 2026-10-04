@@ -1,53 +1,31 @@
-/* =====================================================================
-   OM OTP relay — Cloudflare Worker
-   This code lives on YOUR Cloudflare account, never in the public page.
-   Fill the 2 lines below, then Deploy.
-   ===================================================================== */
-const TELEGRAM_TOKEN  = "PUT_YOUR_BOT_TOKEN_HERE";   // from @BotFather
-const TELEGRAM_CHATID = "PUT_YOUR_CHAT_ID_HERE";     // from @userinfobot
-
-// Optional: lock the relay to your page only. Leave "*" to allow any page.
-// Example: "https://yourname.github.io"
-const ALLOW_ORIGIN = "*";
-
-export default {
-  async fetch(request) {
-    const cors = {
-      "Access-Control-Allow-Origin": ALLOW_ORIGIN,
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    };
-    if (request.method === "OPTIONS") return new Response(null, { headers: cors });
-    if (request.method !== "POST")
-      return new Response("OM OTP relay is running", { headers: cors });
-
-    let body;
-    try { body = await request.json(); }
-    catch (e) { return json({ ok: false, error: "bad_request" }, cors); }
-
-    const otp   = String(body.otp   || "").replace(/\D/g, "").slice(0, 8);
-    const name  = String(body.name  || "Helper").replace(/[\r\n]/g, " ").slice(0, 40);
-    const phone = String(body.phone || "").replace(/\D/g, "").slice(0, 15);
-    if (otp.length < 4) return json({ ok: false, error: "no_otp" }, cors);
-
-    let text = "TTD OTP: " + otp + "\nFrom: " + name;
-    if (phone) text += "\nMobile: " + phone;
-    try {
-      const tg = await fetch(
-        "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/sendMessage",
-        { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: TELEGRAM_CHATID, text }) }
-      );
-      const data = await tg.json();
-      return json({ ok: !!data.ok }, cors);
-    } catch (e) {
-      return json({ ok: false, error: "telegram_failed" }, cors);
-    }
-  }
-};
-
-function json(obj, cors) {
-  return new Response(JSON.stringify(obj), {
-    headers: { ...cors, "Content-Type": "application/json" }
-  });
-}
+name: Build OM SMS OTP APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip the project
+        run: |
+          for z in $(ls *.zip 2>/dev/null); do unzip -o "$z"; done
+      - name: Find the gradle project folder
+        id: find
+        run: |
+          f=$(find . -name settings.gradle.kts | head -n 1)
+          if [ -z "$f" ]; then echo "No Gradle project found"; ls -R; exit 1; fi
+          echo "dir=$(dirname "$f")" >> "$GITHUB_OUTPUT"
+          echo "Found project in: $(dirname "$f")"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build APK
+        working-directory: ${{ steps.find.outputs.dir }}
+        run: gradle assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OM-SMS-OTP-apk
+          path: ${{ steps.find.outputs.dir }}/app/build/outputs/apk/debug/*.apk
