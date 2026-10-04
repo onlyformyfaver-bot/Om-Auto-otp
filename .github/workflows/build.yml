@@ -7,20 +7,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unzip project
+      - name: Unzip if a zip was uploaded
         run: |
-          unzip -o "$(ls *.zip | head -n 1)"
+          z=$(ls *.zip 2>/dev/null | head -n 1)
+          if [ -n "$z" ]; then unzip -o "$z"; fi
+      - name: Find the gradle project folder
+        id: find
+        run: |
+          d=$(dirname "$(find . -name settings.gradle.kts | head -n 1)")
+          echo "dir=$d" >> "$GITHUB_OUTPUT"
+          echo "Project is in: $d"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
       - name: Build APK
-        working-directory: OMSmsOtp
+        working-directory: ${{ steps.find.outputs.dir }}
         run: gradle assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: OM-SMS-OTP-apk
-          path: OMSmsOtp/app/build/outputs/apk/debug/*.apk
+          path: ${{ steps.find.outputs.dir }}/app/build/outputs/apk/debug/*.apk
