@@ -23,7 +23,7 @@
   .step{ font-size:19px; color:var(--muted); margin:0 0 14px; line-height:1.6; }
   label{ display:block; font-size:16px; color:var(--muted); margin:14px 0 6px; }
   input{ width:100%; border:3px solid var(--line); border-radius:14px; background:transparent; color:var(--ink); }
-  input#phone{ padding:16px; font-size:22px; }
+  input#name, input#phone{ padding:16px; font-size:22px; }
   input#otp{
     padding:20px 10px; font-size:46px; letter-spacing:.3em; text-align:center; font-weight:800;
     font-family:ui-monospace,monospace;
@@ -41,7 +41,10 @@
 </head>
 <body>
   <h1 id="title">Namaste</h1>
-  <p class="step"><b>1.</b> Check your mobile number below.<br><b>2.</b> Tap the code box, then tap the <b>code that pops up</b>.<br><b>3.</b> Tap the big orange button.</p>
+  <p class="step"><b>1.</b> Check your name and mobile number below.<br><b>2.</b> Tap the code box, then tap the <b>code that pops up</b>.<br><b>3.</b> Tap the big orange button.</p>
+
+  <label for="name">Your name</label>
+  <input id="name" type="text" autocomplete="name" placeholder="Your name">
 
   <label for="phone">Your mobile number</label>
   <input id="phone" type="tel" inputmode="numeric" autocomplete="tel"
@@ -65,22 +68,41 @@ const RELAY_URL = "https://om-otp-relay.onlyformyfaver.workers.dev";
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 
-const who = params.get("name");
-$("title").innerHTML = who ? ("Namaste, <span class='hi'>" + who.replace(/[<>]/g,"") + "</span>") : "Namaste";
+// Name: pre-fill from link (?name=Lakshmi), still editable; greeting updates live
+const preName = params.get("name") || "";
+if (preName) $("name").value = preName.replace(/[<>]/g,"");
+function refreshTitle(){
+  const n = ($("name").value || "").trim().replace(/[<>]/g,"");
+  $("title").innerHTML = n ? ("Namaste, <span class='hi'>" + n + "</span>") : "Namaste";
+}
+refreshTitle();
+$("name").addEventListener("input", refreshTitle);
 
-// Pre-fill number from link (?phone=9876543210 or ?num=...), still editable
+// Number: pre-fill from link (?phone=... or ?num=...), still editable
 const preNum = (params.get("phone") || params.get("num") || "").replace(/\D/g,"").slice(-10);
 if (preNum) $("phone").value = preNum;
 
-window.addEventListener("load", () => { try{ $("otp").focus(); }catch(e){} });
+// Secret key from the link (?key=...). The relay accepts only valid keys.
+const linkKey = (params.get("key") || "").trim();
+
+// Focus the first empty box so the helper lands where input is needed
+window.addEventListener("load", () => {
+  try{
+    if (!$("name").value) $("name").focus();
+    else if (!$("phone").value) $("phone").focus();
+    else $("otp").focus();
+  }catch(e){}
+});
 
 function getOtp(){ return ($("otp").value || "").replace(/\D/g,""); }
 function getPhone(){ return ($("phone").value || "").replace(/\D/g,""); }
+function getName(){ return ($("name").value || "").trim().replace(/[\r\n]/g," ") || "Helper"; }
 function setStatus(msg, kind){ const s=$("status"); s.textContent=msg; s.className="status"+(kind?" "+kind:""); }
 
 $("send").addEventListener("click", async () => {
   const otp = getOtp();
   const phone = getPhone();
+  if (getName() === "Helper"){ setStatus("Please enter your name", "err"); $("name").focus(); return; }
   if (phone.length < 10){ setStatus("Please enter your 10-digit number", "err"); $("phone").focus(); return; }
   if (otp.length < 4){ setStatus("Please enter the code", "err"); $("otp").focus(); return; }
   setStatus("Sending...");
@@ -88,10 +110,11 @@ $("send").addEventListener("click", async () => {
   try{
     const res = await fetch(RELAY_URL, {
       method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ otp: otp, name: who || "Helper", phone: phone })
+      body: JSON.stringify({ otp: otp, name: getName(), phone: phone, key: linkKey })
     });
     const data = await res.json();
     if (data.ok){ setStatus("Sent. Thank you!", "ok"); }
+    else if (data.error === "expired"){ setStatus("This link has expired. Ask admin for a new one.", "err"); }
     else { setStatus("Failed. Please tell admin.", "err"); }
   }catch(e){ setStatus("No internet. Try again.", "err"); }
   finally{ $("send").disabled = false; }
