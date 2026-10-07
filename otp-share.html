@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Send OTP to Admin</title>
+<style>
+  :root{ --bg:#fff; --ink:#111; --muted:#555; --brand:#e65100; --ok:#1b7f3a; --err:#c62828; --line:#d9d4cb; }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){ --bg:#141210; --ink:#f5f1ea; --muted:#b4aca1; --brand:#ff9800; --ok:#4caf72; --err:#ef5350; --line:#34302a; }
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; }
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column; justify-content:center;
+    padding:calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom));
+    max-width:520px; margin:0 auto;
+  }
+  h1{ font-size:28px; line-height:1.3; margin:0 0 16px; font-weight:800; }
+  h1 .hi{ color:var(--brand); }
+  .step{ font-size:19px; color:var(--muted); margin:0 0 14px; line-height:1.6; }
+  label{ display:block; font-size:16px; color:var(--muted); margin:14px 0 6px; }
+  input{ width:100%; border:3px solid var(--line); border-radius:14px; background:transparent; color:var(--ink); }
+  input#name, input#phone{ padding:16px; font-size:22px; }
+  input#otp{
+    padding:20px 10px; font-size:46px; letter-spacing:.3em; text-align:center; font-weight:800;
+    font-family:ui-monospace,monospace;
+  }
+  input:focus{ outline:none; border-color:var(--brand); }
+  .btn{
+    width:100%; margin-top:20px; padding:26px; font-size:26px; font-weight:800;
+    border:none; border-radius:18px; color:#fff; background:var(--brand); cursor:pointer;
+  }
+  .btn:active{ transform:scale(.99); }
+  .btn:disabled{ opacity:.5; }
+  .status{ margin-top:18px; text-align:center; font-weight:800; font-size:22px; min-height:28px; }
+  .status.ok{ color:var(--ok); } .status.err{ color:var(--err); }
+</style>
+</head>
+<body>
+  <!-- Shown only when the link is expired/invalid: no form, just the message -->
+  <div id="expiredView" style="display:none; text-align:center; padding-top:40px">
+    <div style="font-size:54px">⛔</div>
+    <h1 style="color:var(--err)">Link expired</h1>
+    <p class="step" style="text-align:center">This link is no longer valid.<br>Please ask admin for a new link.</p>
+  </div>
+
+  <!-- The normal form -->
+  <div id="formView">
+    <h1 id="title">Namaste</h1>
+    <p class="step"><b>1.</b> Check your name and mobile number below.<br><b>2.</b> Tap the code box, then tap the <b>code that pops up</b>.<br><b>3.</b> Tap the big orange button.</p>
+
+    <label for="name">Your name</label>
+    <input id="name" type="text" autocomplete="name" placeholder="Your name">
+
+    <label for="phone">Your mobile number</label>
+    <input id="phone" type="tel" inputmode="numeric" autocomplete="tel"
+           pattern="[0-9]*" maxlength="10" placeholder="10-digit number">
+
+    <label for="otp">TTD OTP</label>
+    <input id="otp" type="text" inputmode="numeric" autocomplete="one-time-code"
+           pattern="[0-9]*" maxlength="8" placeholder="------">
+
+    <button class="btn" id="send">SEND OTP</button>
+
+    <div class="status" id="status"></div>
+  </div>
+
+<script>
+/* ======================================================================
+   Your Cloudflare Worker address. Nothing secret is stored here.
+   ====================================================================== */
+const RELAY_URL = "https://om-otp-relay.onlyformyfaver.workers.dev";
+/* ====================================================================== */
+
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+
+// Name: pre-fill from link (?name=Lakshmi), still editable; greeting updates live
+const preName = params.get("name") || "";
+if (preName) $("name").value = preName.replace(/[<>]/g,"");
+function refreshTitle(){
+  const n = ($("name").value || "").trim().replace(/[<>]/g,"");
+  $("title").innerHTML = n ? ("Namaste, <span class='hi'>" + n + "</span>") : "Namaste";
+}
+refreshTitle();
+$("name").addEventListener("input", refreshTitle);
+
+// Number: pre-fill from link (?phone=... or ?num=...), still editable
+const preNum = (params.get("phone") || params.get("num") || "").replace(/\D/g,"").slice(-10);
+if (preNum) $("phone").value = preNum;
+
+// Signed link: carries ?exp=<ms> and ?sig=<signature>. Page checks expiry on load.
+const linkExp = Number(params.get("exp") || 0);
+const linkSig = (params.get("sig") || "").trim();
+if (!linkExp || !linkSig || Date.now() > linkExp) {
+  $("formView").style.display = "none";
+  $("expiredView").style.display = "block";
+  throw new Error("link expired");   // stop the rest of the page from running
+}
+
+// Focus the first empty box so the helper lands where input is needed
+window.addEventListener("load", () => {
+  try{
+    if (!$("name").value) $("name").focus();
+    else if (!$("phone").value) $("phone").focus();
+    else $("otp").focus();
+  }catch(e){}
+});
+
+function getOtp(){ return ($("otp").value || "").replace(/\D/g,""); }
+function getPhone(){ return ($("phone").value || "").replace(/\D/g,""); }
+function getName(){ return ($("name").value || "").trim().replace(/[\r\n]/g," ") || "Helper"; }
+function setStatus(msg, kind){ const s=$("status"); s.textContent=msg; s.className="status"+(kind?" "+kind:""); }
+
+$("send").addEventListener("click", async () => {
+  const otp = getOtp();
+  const phone = getPhone();
+  if (getName() === "Helper"){ setStatus("Please enter your name", "err"); $("name").focus(); return; }
+  if (phone.length < 10){ setStatus("Please enter your 10-digit number", "err"); $("phone").focus(); return; }
+  if (otp.length < 4){ setStatus("Please enter the code", "err"); $("otp").focus(); return; }
+  setStatus("Sending...");
+  $("send").disabled = true;
+  try{
+    const res = await fetch(RELAY_URL, {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ otp: otp, name: getName(), phone: phone, exp: linkExp, sig: linkSig })
+    });
+    const data = await res.json();
+    if (data.ok){ setStatus("Sent. Thank you!", "ok"); }
+    else if (data.error === "expired"){ setStatus("This link has expired. Ask admin for a new one.", "err"); }
+    else { setStatus("Failed. Please tell admin.", "err"); }
+  }catch(e){ setStatus("No internet. Try again.", "err"); }
+  finally{ $("send").disabled = false; }
+});
+</script>
+</body>
+</html>
