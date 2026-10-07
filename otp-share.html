@@ -40,23 +40,33 @@
 </style>
 </head>
 <body>
-  <h1 id="title">Namaste</h1>
-  <p class="step"><b>1.</b> Check your name and mobile number below.<br><b>2.</b> Tap the code box, then tap the <b>code that pops up</b>.<br><b>3.</b> Tap the big orange button.</p>
+  <!-- Shown only when the link is expired/invalid: no form, just the message -->
+  <div id="expiredView" style="display:none; text-align:center; padding-top:40px">
+    <div style="font-size:54px">⛔</div>
+    <h1 style="color:var(--err)">Link expired</h1>
+    <p class="step" style="text-align:center">This link is no longer valid.<br>Please ask admin for a new link.</p>
+  </div>
 
-  <label for="name">Your name</label>
-  <input id="name" type="text" autocomplete="name" placeholder="Your name">
+  <!-- The normal form -->
+  <div id="formView">
+    <h1 id="title">Namaste</h1>
+    <p class="step"><b>1.</b> Check your name and mobile number below.<br><b>2.</b> Tap the code box, then tap the <b>code that pops up</b>.<br><b>3.</b> Tap the big orange button.</p>
 
-  <label for="phone">Your mobile number</label>
-  <input id="phone" type="tel" inputmode="numeric" autocomplete="tel"
-         pattern="[0-9]*" maxlength="10" placeholder="10-digit number">
+    <label for="name">Your name</label>
+    <input id="name" type="text" autocomplete="name" placeholder="Your name">
 
-  <label for="otp">TTD OTP</label>
-  <input id="otp" type="text" inputmode="numeric" autocomplete="one-time-code"
-         pattern="[0-9]*" maxlength="8" placeholder="------">
+    <label for="phone">Your mobile number</label>
+    <input id="phone" type="tel" inputmode="numeric" autocomplete="tel"
+           pattern="[0-9]*" maxlength="10" placeholder="10-digit number">
 
-  <button class="btn" id="send">SEND OTP</button>
+    <label for="otp">TTD OTP</label>
+    <input id="otp" type="text" inputmode="numeric" autocomplete="one-time-code"
+           pattern="[0-9]*" maxlength="8" placeholder="------">
 
-  <div class="status" id="status"></div>
+    <button class="btn" id="send">SEND OTP</button>
+
+    <div class="status" id="status"></div>
+  </div>
 
 <script>
 /* ======================================================================
@@ -84,6 +94,14 @@ if (preNum) $("phone").value = preNum;
 
 // Secret key from the link (?key=...). The relay accepts only valid keys.
 const linkKey = (params.get("key") || "").trim();
+
+// Expiry time carried in the link (?exp=<ms>). If past, show only the expired message — no form.
+const linkExp = Number(params.get("exp") || 0);
+if ((linkExp && Date.now() > linkExp) || !linkKey) {
+  $("formView").style.display = "none";
+  $("expiredView").style.display = "block";
+  throw new Error("link expired");   // stop the rest of the page from running
+}
 
 // Focus the first empty box so the helper lands where input is needed
 window.addEventListener("load", () => {
