@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OM OTP — Link Manager</title>
+<style>
+  :root{ --bg:#fff; --ink:#141414; --muted:#666; --brand:#e65100; --ok:#1b7f3a; --err:#c62828; --line:#ddd7cd; --card:#f6f2ec; }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){ --bg:#141210; --ink:#f3efe9; --muted:#aaa196; --brand:#ff9800; --ok:#4caf72; --err:#ef5350; --line:#34302a; --card:#1e1b18; }
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; }
+  body{ background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    max-width:620px; margin:0 auto; padding:calc(18px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom)); }
+  h1{ font-size:22px; margin:0 0 4px; } h2{ font-size:16px; margin:22px 0 8px; }
+  p.sub{ color:var(--muted); font-size:14px; margin:0 0 14px; }
+  label{ display:block; font-size:13px; color:var(--muted); margin:12px 0 5px; }
+  input{ width:100%; padding:13px; font-size:16px; border:2px solid var(--line); border-radius:10px; background:transparent; color:var(--ink); }
+  input:focus{ outline:none; border-color:var(--brand); }
+  .btn{ width:100%; margin-top:14px; padding:15px; font-size:16px; font-weight:700; border:none; border-radius:12px; color:#fff; background:var(--brand); cursor:pointer; }
+  .btn:active{ transform:scale(.99); }
+  .btn.sec{ background:transparent; color:var(--brand); border:2px solid var(--brand); }
+  .chips{ display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .chip{ padding:9px 12px; font-size:14px; border:2px solid var(--line); border-radius:20px; background:transparent; color:var(--ink); cursor:pointer; }
+  .chip.on{ border-color:var(--brand); color:var(--brand); font-weight:700; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .row .btn{ flex:1; min-width:120px; margin-top:0; padding:11px; font-size:14px; }
+  .item{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-top:10px; }
+  .item .name{ font-weight:700; font-size:16px; }
+  .item .meta{ font-size:13px; color:var(--muted); margin:3px 0 8px; word-break:break-all; }
+  .pill{ display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; margin-left:6px; }
+  .pill.ok{ background:rgba(27,127,58,.15); color:var(--ok); } .pill.exp{ background:rgba(198,40,40,.15); color:var(--err); }
+  .toast{ position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#222; color:#fff; padding:10px 18px; border-radius:20px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:9; }
+  .toast.show{ opacity:1; }
+  textarea{ width:100%; min-height:120px; font-family:ui-monospace,monospace; font-size:12px; padding:10px; border:2px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); }
+  details{ margin-top:16px; } summary{ cursor:pointer; font-weight:700; color:var(--brand); }
+</style>
+</head>
+<body>
+  <h1>Link Manager</h1>
+  <p class="sub">Private — for you only. Create a helper link, choose how long it lasts, then press “Copy Worker keys” and paste into Cloudflare to apply.</p>
+
+  <h2>Create a link</h2>
+  <label for="name">Helper name</label>
+  <input id="name" type="text" placeholder="e.g. Lakshmi">
+  <label for="phone">Helper mobile (optional)</label>
+  <input id="phone" type="tel" inputmode="numeric" maxlength="10" placeholder="10 digits">
+  <label>Link lasts for</label>
+  <div class="chips" id="durchips"></div>
+  <label for="exact" style="margin-top:10px">…or pick an exact end time</label>
+  <input id="exact" type="datetime-local">
+  <button class="btn" id="create">Create link</button>
+
+  <h2>Your links</h2>
+  <div id="list"></div>
+
+  <details>
+    <summary>Update the Worker (paste this in Cloudflare)</summary>
+    <p class="sub" style="margin-top:10px">Copy the block below, open your Worker → Edit code, replace the old <b>const KEYS = {…};</b> with this, then Deploy. Expired links are dropped automatically.</p>
+    <button class="btn sec" id="copyworker">Copy Worker keys</button>
+    <textarea id="workerout" readonly></textarea>
+  </details>
+
+  <details>
+    <summary>Settings &amp; backup</summary>
+    <label for="base">Share page address</label>
+    <input id="base" type="text" value="https://onlyformyfaver-bot.github.io/Om-Auto-otp/otp-share.html">
+    <p class="sub" style="margin-top:12px">Links are saved on this device. To move to another device, copy this backup and paste it there.</p>
+    <div class="row"><button class="btn sec" id="exp2">Copy backup</button><button class="btn sec" id="imp">Paste backup</button></div>
+  </details>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const LS = "om_links_v2", LSB = "om_base_v1";
+let links = [];
+try { links = JSON.parse(localStorage.getItem(LS) || "[]"); } catch(e){ links = []; }
+if (localStorage.getItem(LSB)) $("base").value = localStorage.getItem(LSB);
+
+// Duration choices (minutes). Default 30 min.
+const DURS = [["30 min",30],["1 hour",60],["3 hours",180],["6 hours",360],["1 day",1440],["7 days",10080]];
+let durMin = 30;
+(function(){
+  const c = $("durchips");
+  DURS.forEach(([label,m]) => {
+    const b=document.createElement("button"); b.className="chip"+(m===durMin?" on":""); b.textContent=label;
+    b.onclick=()=>{ durMin=m; $("exact").value=""; [...c.children].forEach(x=>x.classList.remove("on")); b.classList.add("on"); };
+    c.appendChild(b);
+  });
+})();
+$("exact").addEventListener("input", ()=>{ [...$("durchips").children].forEach(x=>x.classList.remove("on")); });
+
+function save(){ try{ localStorage.setItem(LS, JSON.stringify(links)); }catch(e){} }
+function toast(t){ const el=$("toast"); el.textContent=t; el.classList.add("show"); setTimeout(()=>el.classList.remove("show"),1800); }
+function slug(s){ return (s||"helper").toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,10) || "helper"; }
+function rand(){ return Math.random().toString(36).slice(2,6); }
+// Random key with no name in it, e.g. "k7f3q9". Collision-checked at create time.
+function newKey(){
+  let k;
+  do { k = "k" + Math.random().toString(36).slice(2,8); }
+  while (links.some(o => o.key === k));
+  return k;
+}
+function isExpired(ms){ return Date.now() > ms; }
+function fmt(ms){ try{ return new Date(ms).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:true}); }catch(e){ return new Date(ms).toString(); } }
+function remaining(ms){ const s=Math.round((ms-Date.now())/60000); if(s<=0) return "expired"; if(s<60) return s+" min left"; const h=Math.round(s/60); if(h<48) return h+" hr left"; return Math.round(h/24)+" days left"; }
+
+function chosenExpiry(){
+  const ex = $("exact").value;
+  if (ex){ const t = Date.parse(ex); if(!isNaN(t)) return t; }   // datetime-local = device local time (IST)
+  return Date.now() + durMin*60000;
+}
+
+function linkUrl(it){
+  const base = ($("base").value || "").trim();
+  const q = ["name=" + encodeURIComponent(it.name), "key=" + encodeURIComponent(it.key), "exp=" + it.exp];
+  if (it.phone) q.push("phone=" + encodeURIComponent(it.phone));
+  return base + "?" + q.join("&");
+}
+
+async function copy(text, msg){
+  try{ await navigator.clipboard.writeText(text); toast(msg||"Copied"); }
+  catch(e){ const t=document.createElement("textarea"); t.value=text; document.body.appendChild(t); t.select(); try{document.execCommand("copy"); toast(msg||"Copied");}catch(_){ toast("Copy failed"); } document.body.removeChild(t); }
+}
+function mk(label, fn){ const b=document.createElement("button"); b.className="btn"; b.textContent=label; b.onclick=fn; return b; }
+
+let editing = -1;
+
+function render(){
+  const list = $("list"); list.innerHTML = "";
+  if (links.length === 0){ list.innerHTML = '<p class="sub">No links yet.</p>'; }
+  links.forEach((it, i) => {
+    const exp = isExpired(it.exp);
+    const d = document.createElement("div"); d.className = "item";
+    d.innerHTML =
+      '<div class="name">' + (it.name||"Helper") +
+        '<span class="pill ' + (exp?"exp":"ok") + '">' + (exp?"Expired":remaining(it.exp)) + '</span></div>' +
+      '<div class="meta">' + (it.phone?("📱 "+it.phone+" · "):"") + 'ends ' + fmt(it.exp) + ' · key ' + it.key + '</div>';
+
+    if (editing === i){
+      const box = document.createElement("div");
+      box.innerHTML =
+        '<label>Name</label><input id="e_name" type="text" value="'+(it.name||"").replace(/"/g,"&quot;")+'">' +
+        '<label>Mobile (optional)</label><input id="e_phone" type="tel" maxlength="10" value="'+(it.phone||"")+'">' +
+        '<label>New end time</label><input id="e_exact" type="datetime-local">' +
+        '<label>Key (the secret in the link)</label><input id="e_key" type="text" value="'+(it.key||"").replace(/"/g,"&quot;")+'">';
+      d.appendChild(box);
+      // prefill datetime-local with current expiry (local)
+      try{ const dt=new Date(it.exp); const p=n=>String(n).padStart(2,"0");
+        box.querySelector("#e_exact").value = dt.getFullYear()+"-"+p(dt.getMonth()+1)+"-"+p(dt.getDate())+"T"+p(dt.getHours())+":"+p(dt.getMinutes()); }catch(e){}
+      const er = document.createElement("div"); er.className="row"; er.style.marginTop="10px";
+      const bSave = mk("Save", () => {
+        const nk = (box.querySelector("#e_key").value||"").trim().replace(/[^A-Za-z0-9_-]/g,"");
+        const exv = box.querySelector("#e_exact").value;
+        const t = exv ? Date.parse(exv) : it.exp;
+        if (!nk){ toast("Key cannot be empty"); return; }
+        if (isNaN(t)){ toast("Pick an end time"); return; }
+        if (links.some((o,j)=> j!==i && o.key===nk)){ toast("That key is already used"); return; }
+        it.name = (box.querySelector("#e_name").value||"").trim() || "Helper";
+        it.phone = (box.querySelector("#e_phone").value||"").replace(/\D/g,"").slice(0,10);
+        it.exp = t; it.key = nk;
+        editing = -1; save(); render();
+      });
+      const bCancel = mk("Cancel", () => { editing = -1; render(); }); bCancel.className="btn sec";
+      er.appendChild(bSave); er.appendChild(bCancel);
+      d.appendChild(er); list.appendChild(d); return;
+    }
+
+    const row1 = document.createElement("div"); row1.className="row";
+    row1.appendChild(mk("Copy link",()=>copy(linkUrl(it),"Link copied")));
+    row1.appendChild(mk("WhatsApp",()=>{ const msg=(it.name?it.name+", ":"")+"please share your TTD OTP here: "+linkUrl(it); location.href="https://wa.me/"+(it.phone?("91"+it.phone):"")+"?text="+encodeURIComponent(msg); }));
+    const row2 = document.createElement("div"); row2.className="row"; row2.style.marginTop="8px";
+    const bEdit=mk("Edit",()=>{ editing=i; render(); }); bEdit.className="btn sec";
+    const bDel=mk("Remove",()=>{ links.splice(i,1); save(); render(); toast("Removed — update the Worker"); }); bDel.className="btn sec";
+    row2.appendChild(bEdit); row2.appendChild(bDel);
+    d.appendChild(row1); d.appendChild(row2);
+    list.appendChild(d);
+  });
+  updateWorker();
+}
+
+function updateWorker(){
+  const active = links.filter(it => !isExpired(it.exp));
+  let s = "const KEYS = {\n";
+  s += active.map(it => '  "' + it.key + '": ' + it.exp + '  // ' + (it.name||"") + ' — ' + fmt(it.exp)).join(",\n");
+  s += (active.length ? "\n" : "") + "};";
+  $("workerout").value = s;
+}
+
+$("create").addEventListener("click", () => {
+  const name = ($("name").value||"").trim();
+  const phone = ($("phone").value||"").replace(/\D/g,"").slice(0,10);
+  if (!name){ toast("Enter a name"); return; }
+  const exp = chosenExpiry();
+  const key = newKey();
+  links.unshift({ name, phone, exp, key });
+  save(); render();
+  $("name").value=""; $("phone").value=""; $("exact").value="";
+  copy(linkUrl(links[0]), "Link created & copied");
+});
+
+$("copyworker").addEventListener("click", () => copy($("workerout").value, "Worker keys copied"));
+$("base").addEventListener("input", () => { localStorage.setItem(LSB, $("base").value.trim()); });
+$("exp2").addEventListener("click", () => copy(JSON.stringify(links), "Backup copied"));
+$("imp").addEventListener("click", () => { const t=prompt("Paste backup here:"); if(t){ try{ const a=JSON.parse(t); if(Array.isArray(a)){ links=a; save(); render(); toast("Backup loaded"); } }catch(e){ toast("Invalid backup"); } } });
+
+// Refresh the "time left" labels every 30s
+setInterval(render, 30000);
+render();
+</script>
+</body>
+</html>
